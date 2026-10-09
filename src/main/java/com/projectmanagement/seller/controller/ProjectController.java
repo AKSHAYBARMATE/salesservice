@@ -57,6 +57,11 @@ public class ProjectController {
         return ResponseEntity.ok(projectService.updateProjectStatus(id, requestDto));
     }
 
+    @PostMapping("/assignSalesPerson/{id}")
+    public ResponseEntity<StandardResponse<ProjectResponseDto>> assignSalesPerson(@PathVariable Long id, @Valid @RequestBody ProjectAssignSalesPersonRequestDto requestDto) {
+        return ResponseEntity.ok(projectService.assignSalesPerson(id, requestDto));
+    }
+
     @PostMapping("/submitProjectForReview/{id}")
     public ResponseEntity<StandardResponse<ProjectResponseDto>> submitProjectForReview(@PathVariable Long id) {
         return ResponseEntity.ok(projectService.submitForReview(id));

@@ -60,7 +60,11 @@ public class ProjectServiceImpl implements ProjectService {
         }
 
         User createdByUser = currentUser;
-        User assignedTo = currentUser;
+        User assignedTo = null;
+        if (requestDto.getAssignedTo() != null) {
+            assignedTo = userRepository.findById(requestDto.getAssignedTo())
+                    .orElseThrow(() -> new ResourceNotFoundException("Sales person not found with id: " + requestDto.getAssignedTo()));
+        }
 
         ProjectStatus status = null;
         if (requestDto.getStatusId() != null) {
@@ -180,6 +184,12 @@ public class ProjectServiceImpl implements ProjectService {
             project.setStatus(status);
         }
 
+        if (requestDto.getAssignedTo() != null) {
+            User assignedTo = userRepository.findById(requestDto.getAssignedTo())
+                    .orElseThrow(() -> new ResourceNotFoundException("Sales person not found with id: " + requestDto.getAssignedTo()));
+            project.setAssignedTo(assignedTo);
+        }
+
         if (requestDto.getExpectedValue() != null) {
             if (requestDto.getExpectedValue().compareTo(BigDecimal.ZERO) < 0) {
                 throw new CustomException("Expected value cannot be negative", "INVALID_VALUE");
@@ -240,6 +250,53 @@ public class ProjectServiceImpl implements ProjectService {
         );
 
         return StandardResponse.success(mapToDto(updated), "Project status updated successfully");
+    }
+
+    @Override
+    @Transactional
+    public StandardResponse<ProjectResponseDto> assignSalesPerson(Long id, ProjectAssignSalesPersonRequestDto requestDto) {
+        if (id == null) {
+            throw new CustomException("Project ID cannot be null", "INVALID_INPUT");
+        }
+        if (requestDto == null || requestDto.getSalesPersonId() == null) {
+            throw new CustomException("Sales person ID is required", "INVALID_INPUT");
+        }
+
+        Project project = projectRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Project not found with id: " + id));
+
+        User salesPerson = userRepository.findById(requestDto.getSalesPersonId())
+                .orElseThrow(() -> new ResourceNotFoundException("Sales person not found with id: " + requestDto.getSalesPersonId()));
+
+        User oldAssigned = project.getAssignedTo();
+        project.setAssignedTo(salesPerson);
+
+        // Calculate expected commission and royalty based on assigned user's sales level if not set
+        if (salesPerson.getSalesLevel() != null && project.getExpectedValue() != null && project.getExpectedValue().compareTo(BigDecimal.ZERO) > 0) {
+            SalesLevel level = salesPerson.getSalesLevel();
+            if ((project.getExpectedCommission() == null || project.getExpectedCommission().compareTo(BigDecimal.ZERO) == 0) && level.getCommissionRate() != null) {
+                project.setExpectedCommission(project.getExpectedValue().multiply(level.getCommissionRate())
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+            }
+            if ((project.getExpectedRoyalty() == null || project.getExpectedRoyalty().compareTo(BigDecimal.ZERO) == 0) && level.getRoyaltyRate() != null) {
+                project.setExpectedRoyalty(project.getExpectedValue().multiply(level.getRoyaltyRate())
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+            }
+        }
+
+        Project updated = projectRepository.save(project);
+
+        auditLogService.log(
+                loginUser.getUserId(),
+                "ASSIGN_SALESPERSON",
+                "PROJECT",
+                updated.getId(),
+                "assignedTo=" + (oldAssigned != null ? oldAssigned.getName() : "None"),
+                "assignedTo=" + salesPerson.getName(),
+                null
+        );
+
+        return StandardResponse.success(mapToDto(updated), "Sales person assigned successfully");
     }
 
     @Override

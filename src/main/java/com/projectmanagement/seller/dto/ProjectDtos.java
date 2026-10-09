@@ -27,6 +27,8 @@ public class ProjectDtos {
         @NotNull(message = "Client ID is required")
         private Long clientId;
 
+        private Long assignedTo;
+
         private Long statusId;
 
         private BigDecimal expectedValue;
@@ -71,6 +73,15 @@ public class ProjectDtos {
     public static class ProjectStatusUpdateRequestDto {
         @NotNull(message = "Status ID is required")
         private Long statusId;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ProjectAssignSalesPersonRequestDto {
+        @NotNull(message = "Salesperson ID is required")
+        private Long salesPersonId;
     }
 
     @Data
