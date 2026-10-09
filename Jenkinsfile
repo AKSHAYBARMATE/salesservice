@@ -4,9 +4,9 @@ pipeline {
     environment {
         COMPOSE_FILE = "docker-compose.sellerservice.yml"
         REGISTRY_CONTAINER_NAME = "serviceregistry"
-        TARGET_SERVICE = "academic"
-        TARGET_CONTAINER_NAME = "academic"
-        TARGET_IMAGE_NAME = "academic:latest"
+        TARGET_SERVICE = "sellerservice"
+        TARGET_CONTAINER_NAME = "sellerservice"
+        TARGET_IMAGE_NAME = "sellerservice:latest"
     }
 
     stages {
