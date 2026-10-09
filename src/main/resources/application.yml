@@ -1,0 +1,101 @@
+server:
+  port: 8084
+  tomcat:
+    connection-timeout: 300000
+    threads:
+      max: 200
+
+spring:
+  mvc:
+    async:
+      request-timeout: 300000
+  application:
+    name: seller-service
+
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: 50MB       # Max size per uploaded file (compressed to ≤800KB before S3)
+      max-request-size: 200MB   # Max total multipart request size (covers multiple files)
+
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: noreplyhelixion@gmail.com
+    password: vpljjitwveanrvpn
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/sales?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+    defer-datasource-initialization: true
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+  config:
+    import: "optional:configserver:"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    com.projectmanagement.seller: INFO
+    org.springframework.web: DEBUG
+    org.hibernate.SQL: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%X{logId:-}] [%X{requestId:-}] [%X{operation:-}] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%X{logId:-}] [%X{requestId:-}] [%X{operation:-}] [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/seller-service.log
+
+# Custom application properties
+app:
+  name: Seller Service
+  version: 1.0.0
+  description: Microservice for Seller Management
+
+jwt:
+  secret: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+  expiration-ms: 86400000 # 24 hours
+
+
+
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka/   # Eureka server URL
+    register-with-eureka: false
+    fetch-registry: false
+  instance:
+    prefer-ip-address: true
+
+
+
+
