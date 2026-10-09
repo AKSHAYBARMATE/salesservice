@@ -5,8 +5,8 @@ pipeline {
         IMAGE_NAME = "salesservice"
         CONTAINER_NAME = "salesservice"
         DOCKER_NETWORK = "updated_orgadmin_rmscadminnetwork"
-        HOST_PORT = "8233"
-        CONTAINER_PORT = "8233"
+        HOST_PORT = "9099"
+        CONTAINER_PORT = "9099"
         DOCKER_BUILDKIT = "0"
     }
 
