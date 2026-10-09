@@ -1,5 +1,5 @@
 server:
-  port: 8084
+  port: 8233
   tomcat:
     connection-timeout: 300000
     threads:
@@ -10,7 +10,7 @@ spring:
     async:
       request-timeout: 300000
   application:
-    name: seller-service
+    name: salesservice
 
   servlet:
     multipart:

@@ -1,28 +1,28 @@
 services:
-  sellerservice:
+  salesservice:
     build:
       context: .
       dockerfile: Dockerfile
-    image: sellerservice:latest
-    container_name: sellerservice
+    image: salesservice:latest
+    container_name: salesservice
     ports:
-      - "8084:8084"
+      - "8233:8233"
     networks:
       - updated_orgadmin_rmscadminnetwork
     environment:
       # Eureka Configuration
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://serviceregistry:8761/eureka
-      EUREKA_CLIENT_REGISTER_WITH_EUREKA: "true"
-      EUREKA_CLIENT_FETCH_REGISTRY: "true"
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://adminserviceregistry:8761/eureka
+      EUREKA_CLIENT_REGISTER_WITH_EUREKA: "false"
+      EUREKA_CLIENT_FETCH_REGISTRY: "false"
       EUREKA_INSTANCE_LEASE_RENEWAL_INTERVAL_IN_SECONDS: "10"
       EUREKA_INSTANCE_LEASE_EXPIRATION_DURATION_IN_SECONDS: "30"
       EUREKA_INSTANCE_ENABLE_SELF_PRESERVATION: "false"
 
       # Spring Actuator Endpoints
-      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,eureka,shutdown
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,eureka,shutdown,metrics
 
-      # External MySQL DB Configuration (update host if needed)
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/schoolerp?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      # MySQL DB Configuration
+      SPRING_DATASOURCE_URL: jdbc:mysql://erp-mysql:3306/sales?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: root
       SPRING_JPA_HIBERNATE_DDL_AUTO: update

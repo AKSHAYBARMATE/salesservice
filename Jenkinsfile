@@ -2,11 +2,12 @@ pipeline {
     agent any
 
     environment {
-        COMPOSE_FILE = "docker-compose.sellerservice.yml"
-        REGISTRY_CONTAINER_NAME = "serviceregistry"
-        TARGET_SERVICE = "sellerservice"
-        TARGET_CONTAINER_NAME = "sellerservice"
-        TARGET_IMAGE_NAME = "sellerservice:latest"
+        IMAGE_NAME = "salesservice"
+        CONTAINER_NAME = "salesservice"
+        DOCKER_NETWORK = "updated_orgadmin_rmscadminnetwork"
+        HOST_PORT = "8233"
+        CONTAINER_PORT = "8233"
+        DOCKER_BUILDKIT = "0"
     }
 
     stages {
@@ -19,34 +20,63 @@ pipeline {
         stage('Docker Version') {
             steps {
                 sh 'docker --version'
-                sh 'docker-compose --version'  // ✅ Use with hyphen
             }
         }
 
-        stage('Check Registry and Run Service') {
+        stage('Ensure Docker Network') {
             steps {
-                script {
-                    def isRegistryRunning = sh(
-                        script: "docker ps -q -f name=${REGISTRY_CONTAINER_NAME}",
-                        returnStdout: true
-                    ).trim()
+                sh """
+                    docker network inspect ${DOCKER_NETWORK} >/dev/null 2>&1 || \
+                    docker network create ${DOCKER_NETWORK}
+                """
+            }
+        }
 
-                    if (isRegistryRunning) {
-                        echo "${REGISTRY_CONTAINER_NAME} is running. Proceeding to build and start ${TARGET_SERVICE}..."
+        stage('Clean Old Container and Image') {
+            steps {
+                sh """
+                    docker rm -f ${CONTAINER_NAME} || true
+                """
+            }
+        }
 
-                        // Remove existing container
-                        sh "docker rm -f ${TARGET_CONTAINER_NAME} || true"
+        stage('Build Docker Image') {
+            steps {
+                sh """
+                    docker build -t ${IMAGE_NAME}:latest .
+                """
+            }
+        }
 
-                        // Remove existing image
-                        sh "docker rmi -f ${TARGET_IMAGE_NAME} || true"
+        stage('Run Container') {
+            steps {
+                sh """
+                    docker run -d --name ${CONTAINER_NAME} \
+                        --restart unless-stopped \
+                        -p ${HOST_PORT}:${CONTAINER_PORT} \
+                        --network ${DOCKER_NETWORK} \
+                        -e EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://adminserviceregistry:8761/eureka/ \
+                        -e EUREKA_CLIENT_REGISTER_WITH_EUREKA=true \
+                        -e EUREKA_CLIENT_FETCH_REGISTRY=true \
+                        -e EUREKA_INSTANCE_LEASE_RENEWAL_INTERVAL_IN_SECONDS=10 \
+                        -e EUREKA_INSTANCE_LEASE_EXPIRATION_DURATION_IN_SECONDS=30 \
+                        -e MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info,eureka,shutdown,metrics \
+                        -e SPRING_DATASOURCE_URL='jdbc:mysql://erp-mysql:3306/hms?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC' \
+                        -e SPRING_DATASOURCE_USERNAME=root \
+                        -e SPRING_DATASOURCE_PASSWORD=root \
+                        -e SPRING_JPA_HIBERNATE_DDL_AUTO=update \
+                        ${IMAGE_NAME}:latest
+                """
+            }
+        }
 
-                        // ✅ Use docker-compose (with hyphen) for build and up
-                        sh "docker-compose -f ${COMPOSE_FILE} build ${TARGET_SERVICE}"
-                        sh "docker-compose -f ${COMPOSE_FILE} up -d ${TARGET_SERVICE}"
-                    } else {
-                        error "${REGISTRY_CONTAINER_NAME} is not running. Aborting deployment of ${TARGET_SERVICE}."
-                    }
-                }
+        stage('Health Check') {
+            steps {
+                sh """
+                    sleep 20
+                    docker ps -q -f name=${CONTAINER_NAME} | grep . || \
+                    (docker logs ${CONTAINER_NAME} || true && exit 1)
+                """
             }
         }
     }
@@ -54,6 +84,12 @@ pipeline {
     post {
         always {
             echo '✅ Pipeline execution completed.'
+        }
+        failure {
+            echo '❌ Deployment failed.'
+        }
+        success {
+            echo '🚀 Deployment successful.'
         }
     }
 }
