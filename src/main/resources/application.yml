@@ -10,7 +10,7 @@ spring:
     async:
       request-timeout: 300000
   application:
-    name: seller-service
+    name: salesservice
 
   servlet:
     multipart:
