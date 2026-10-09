@@ -1,5 +1,5 @@
 server:
-  port: 8233
+  port: 9099
   tomcat:
     connection-timeout: 300000
     threads:
