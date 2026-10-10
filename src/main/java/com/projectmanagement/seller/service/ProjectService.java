@@ -14,10 +14,6 @@ public interface ProjectService {
     StandardResponse<ProjectResponseDto> getProjectById(Long id);
     StandardResponse<ProjectResponseDto> updateProject(Long id, ProjectUpdateRequestDto requestDto);
     StandardResponse<ProjectResponseDto> updateProjectStatus(Long id, ProjectStatusUpdateRequestDto requestDto);
-    StandardResponse<ProjectResponseDto> assignSalesPerson(Long id, ProjectAssignSalesPersonRequestDto requestDto);
-    StandardResponse<ProjectResponseDto> submitForReview(Long id);
-    StandardResponse<ProjectResponseDto> adminApprove(Long id);
-    StandardResponse<ProjectResponseDto> markWon(Long id);
-    StandardResponse<ProjectResponseDto> markLost(Long id);
+    StandardResponse<ProjectResponseDto> updatePrice(Long id, ProjectPriceUpdateRequestDto requestDto);
     StandardResponse<List<AuditLogResponseDto>> getProjectTimeline(Long id);
 }

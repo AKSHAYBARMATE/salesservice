@@ -17,6 +17,8 @@ public class LoginUser {
         private Long userId;
         private String username;
         private String email;
+        private String role;
+        private Long roleId;
     }
 
     private static final ThreadLocal<UserContext> CURRENT_USER = ThreadLocal.withInitial(UserContext::new);
@@ -51,6 +53,22 @@ public class LoginUser {
 
     public void setEmail(String email) {
         CURRENT_USER.get().setEmail(email);
+    }
+
+    public String getRole() {
+        return CURRENT_USER.get().getRole();
+    }
+
+    public void setRole(String role) {
+        CURRENT_USER.get().setRole(role);
+    }
+
+    public Long getRoleId() {
+        return CURRENT_USER.get().getRoleId();
+    }
+
+    public void setRoleId(Long roleId) {
+        CURRENT_USER.get().setRoleId(roleId);
     }
 
     public void clear() {

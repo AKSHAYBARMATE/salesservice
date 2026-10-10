@@ -31,6 +31,7 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectRepository projectRepository;
     private final ClientRepository clientRepository;
     private final UserRepository userRepository;
+    private final SalesLevelRepository salesLevelRepository;
     private final ProjectStatusRepository projectStatusRepository;
     private final ProjectCommissionRepository commissionRepository;
     private final ProjectRoyaltyRepository royaltyRepository;
@@ -54,17 +55,20 @@ public class ProjectServiceImpl implements ProjectService {
         Client client = clientRepository.findById(requestDto.getClientId())
                 .orElseThrow(() -> new ResourceNotFoundException("Client not found with id: " + requestDto.getClientId()));
 
-        User currentUser = null;
-        if (loginUser.getUserId() != null) {
-            currentUser = userRepository.findById(loginUser.getUserId()).orElse(null);
+        if (loginUser.getUserId() == null) {
+            throw new CustomException("Authentication required to create a project", "UNAUTHORIZED");
+        }
+
+        User currentUser = userRepository.findById(loginUser.getUserId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + loginUser.getUserId()));
+
+        String roleName = currentUser.getRole() != null ? currentUser.getRole().getName() : null;
+        if (roleName == null || (!"SALES".equalsIgnoreCase(roleName) && !"SELLER".equalsIgnoreCase(roleName))) {
+            throw new CustomException("Only users with SALES role can create projects", "ACCESS_DENIED");
         }
 
         User createdByUser = currentUser;
-        User assignedTo = null;
-        if (requestDto.getAssignedTo() != null) {
-            assignedTo = userRepository.findById(requestDto.getAssignedTo())
-                    .orElseThrow(() -> new ResourceNotFoundException("Sales person not found with id: " + requestDto.getAssignedTo()));
-        }
+        User assignedTo = currentUser;
 
         ProjectStatus status = null;
         if (requestDto.getStatusId() != null) {
@@ -75,27 +79,6 @@ public class ProjectServiceImpl implements ProjectService {
                     .orElseGet(() -> projectStatusRepository.findAll().stream().findFirst().orElse(null));
         }
 
-        BigDecimal expectedValue = requestDto.getExpectedValue() != null ? requestDto.getExpectedValue() : BigDecimal.ZERO;
-        if (expectedValue.compareTo(BigDecimal.ZERO) < 0) {
-            throw new CustomException("Expected value cannot be negative", "INVALID_VALUE");
-        }
-
-        BigDecimal expectedCommission = requestDto.getExpectedCommission();
-        BigDecimal expectedRoyalty = requestDto.getExpectedRoyalty();
-
-        // Auto calculate expected commission and royalty based on assigned user's sales level
-        if (assignedTo != null && assignedTo.getSalesLevel() != null && expectedValue.compareTo(BigDecimal.ZERO) > 0) {
-            SalesLevel level = assignedTo.getSalesLevel();
-            if (expectedCommission == null && level.getCommissionRate() != null) {
-                expectedCommission = expectedValue.multiply(level.getCommissionRate())
-                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-            }
-            if (expectedRoyalty == null && level.getRoyaltyRate() != null) {
-                expectedRoyalty = expectedValue.multiply(level.getRoyaltyRate())
-                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-            }
-        }
-
         Project project = Project.builder()
                 .title(requestDto.getTitle().trim())
                 .description(requestDto.getDescription())
@@ -103,14 +86,18 @@ public class ProjectServiceImpl implements ProjectService {
                 .createdByUser(createdByUser)
                 .assignedTo(assignedTo)
                 .status(status)
-                .expectedValue(expectedValue)
-                .expectedCommission(expectedCommission != null ? expectedCommission : BigDecimal.ZERO)
-                .expectedRoyalty(expectedRoyalty != null ? expectedRoyalty : BigDecimal.ZERO)
+                .expectedValue(BigDecimal.ZERO)
+                .expectedCommission(BigDecimal.ZERO)
+                .expectedRoyalty(BigDecimal.ZERO)
                 .startDate(requestDto.getStartDate())
                 .expectedCloseDate(requestDto.getExpectedCloseDate())
                 .build();
 
         Project saved = projectRepository.save(project);
+
+        if (assignedTo != null) {
+            updateSalesUserLevel(assignedTo);
+        }
 
         auditLogService.log(
                 loginUser.getUserId(),
@@ -128,7 +115,25 @@ public class ProjectServiceImpl implements ProjectService {
     @Override
     @Transactional(readOnly = true)
     public StandardResponse<Page<ProjectResponseDto>> getProjects(String search, Long clientId, Long assignedTo, Long statusId, Pageable pageable) {
-        Page<ProjectResponseDto> page = projectRepository.findWithFilters(search, clientId, assignedTo, statusId, pageable)
+        Long effectiveAssignedTo = assignedTo;
+
+        if (loginUser.getUserId() != null) {
+            String role = loginUser.getRole();
+            if (role == null || role.isBlank()) {
+                User currentUser = userRepository.findById(loginUser.getUserId()).orElse(null);
+                if (currentUser != null && currentUser.getRole() != null) {
+                    role = currentUser.getRole().getName();
+                }
+            }
+
+            // If user role is SALES / SELLER, only fetch projects assigned to them
+            if ("SALES".equalsIgnoreCase(role) || "SELLER".equalsIgnoreCase(role)) {
+                effectiveAssignedTo = loginUser.getUserId();
+            }
+            // If user role is ADMIN, fetch all projects (or filter by assignedTo query param if provided)
+        }
+
+        Page<ProjectResponseDto> page = projectRepository.findWithFilters(search, clientId, effectiveAssignedTo, statusId, pageable)
                 .map(this::mapToDto);
 
         StandardResponse.ResponseMetadata metadata = StandardResponse.ResponseMetadata.builder()
@@ -235,8 +240,90 @@ public class ProjectServiceImpl implements ProjectService {
         ProjectStatus newStatus = projectStatusRepository.findById(requestDto.getStatusId())
                 .orElseThrow(() -> new ResourceNotFoundException("Project status not found with id: " + requestDto.getStatusId()));
 
-        String oldStatus = project.getStatus() != null ? project.getStatus().getName() : "None";
+        String oldStatusName = project.getStatus() != null ? project.getStatus().getName() : "None";
+        String newStatusName = newStatus.getName();
+
         project.setStatus(newStatus);
+
+        boolean isWon = Boolean.TRUE.equals(newStatus.getIsWonStatus()) || "Won".equalsIgnoreCase(newStatusName);
+        boolean isLost = "Lost".equalsIgnoreCase(newStatusName);
+        boolean isApproved = "Approved".equalsIgnoreCase(newStatusName);
+        boolean isSubmitted = "Submitted".equalsIgnoreCase(newStatusName);
+
+        String auditDetails = null;
+
+        if (isWon) {
+            project.setActualCloseDate(LocalDate.now());
+
+            // Record Commission and Royalty
+            User assignedUser = project.getAssignedTo();
+            if (assignedUser != null) {
+                SalesLevel level = assignedUser.getSalesLevel();
+                BigDecimal commRate = level != null && level.getCommissionRate() != null ? level.getCommissionRate() : BigDecimal.ZERO;
+                BigDecimal commAmount = project.getExpectedValue() != null ?
+                        project.getExpectedValue().multiply(commRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+
+                BigDecimal royRate = level != null && level.getRoyaltyRate() != null ? level.getRoyaltyRate() : BigDecimal.ZERO;
+                BigDecimal royAmount = project.getExpectedValue() != null ?
+                        project.getExpectedValue().multiply(royRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+
+                ProjectCommission commission = ProjectCommission.builder()
+                        .project(project)
+                        .user(assignedUser)
+                        .salesLevel(level)
+                        .commissionRate(commRate)
+                        .commissionAmount(commAmount)
+                        .status("Pending")
+                        .build();
+                commissionRepository.save(commission);
+
+                ProjectRoyalty royalty = ProjectRoyalty.builder()
+                        .project(project)
+                        .user(assignedUser)
+                        .salesLevel(level)
+                        .royaltyRate(royRate)
+                        .royaltyAmount(royAmount)
+                        .periodType("Monthly")
+                        .periodStart(LocalDate.now())
+                        .status("Pending")
+                        .build();
+                royaltyRepository.save(royalty);
+
+                // Update user lifetime stats
+                assignedUser.setTotalCommission(assignedUser.getTotalCommission().add(commAmount));
+                assignedUser.setTotalRoyalty(assignedUser.getTotalRoyalty().add(royAmount));
+                userRepository.save(assignedUser);
+
+                notificationService.sendNotification(
+                        assignedUser.getId(),
+                        "Project Won!",
+                        "Congratulations! Project '" + project.getTitle() + "' marked as WON. Expected commission: $" + commAmount
+                );
+            }
+            auditDetails = "Project marked as WON. Commission and Royalty recorded.";
+        } else if (isLost) {
+            project.setActualCloseDate(LocalDate.now());
+            if (project.getAssignedTo() != null) {
+                notificationService.sendNotification(
+                        project.getAssignedTo().getId(),
+                        "Project Closed - Lost",
+                        "Project '" + project.getTitle() + "' has been marked as LOST."
+                );
+            }
+            auditDetails = "Project marked as LOST";
+        } else if (isApproved) {
+            if (project.getAssignedTo() != null) {
+                notificationService.sendNotification(
+                        project.getAssignedTo().getId(),
+                        "Project Approved",
+                        "Project '" + project.getTitle() + "' has been approved by admin."
+                );
+            }
+            auditDetails = "Project approved by admin";
+        } else if (isSubmitted) {
+            auditDetails = "Project submitted for internal review";
+        }
+
         Project updated = projectRepository.save(project);
 
         auditLogService.log(
@@ -244,245 +331,66 @@ public class ProjectServiceImpl implements ProjectService {
                 "STATUS_CHANGE",
                 "PROJECT",
                 updated.getId(),
-                "status=" + oldStatus,
-                "status=" + newStatus.getName(),
-                null
+                "status=" + oldStatusName,
+                "status=" + newStatusName,
+                auditDetails
         );
 
-        return StandardResponse.success(mapToDto(updated), "Project status updated successfully");
+        return StandardResponse.success(mapToDto(updated), "Project status updated successfully to " + newStatusName);
     }
 
     @Override
     @Transactional
-    public StandardResponse<ProjectResponseDto> assignSalesPerson(Long id, ProjectAssignSalesPersonRequestDto requestDto) {
+    public StandardResponse<ProjectResponseDto> updatePrice(Long id, ProjectPriceUpdateRequestDto requestDto) {
         if (id == null) {
             throw new CustomException("Project ID cannot be null", "INVALID_INPUT");
         }
-        if (requestDto == null || requestDto.getSalesPersonId() == null) {
-            throw new CustomException("Sales person ID is required", "INVALID_INPUT");
+        if (requestDto == null || requestDto.getExpectedValue() == null) {
+            throw new CustomException("Expected price / value is required", "INVALID_INPUT");
+        }
+        if (requestDto.getExpectedValue().compareTo(BigDecimal.ZERO) < 0) {
+            throw new CustomException("Expected value cannot be negative", "INVALID_VALUE");
         }
 
         Project project = projectRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found with id: " + id));
 
-        User salesPerson = userRepository.findById(requestDto.getSalesPersonId())
-                .orElseThrow(() -> new ResourceNotFoundException("Sales person not found with id: " + requestDto.getSalesPersonId()));
+        BigDecimal oldExpectedValue = project.getExpectedValue();
+        BigDecimal expectedValue = requestDto.getExpectedValue();
+        BigDecimal expectedCommission = requestDto.getExpectedCommission();
+        BigDecimal expectedRoyalty = requestDto.getExpectedRoyalty();
 
-        User oldAssigned = project.getAssignedTo();
-        project.setAssignedTo(salesPerson);
-
-        // Calculate expected commission and royalty based on assigned user's sales level if not set
-        if (salesPerson.getSalesLevel() != null && project.getExpectedValue() != null && project.getExpectedValue().compareTo(BigDecimal.ZERO) > 0) {
-            SalesLevel level = salesPerson.getSalesLevel();
-            if ((project.getExpectedCommission() == null || project.getExpectedCommission().compareTo(BigDecimal.ZERO) == 0) && level.getCommissionRate() != null) {
-                project.setExpectedCommission(project.getExpectedValue().multiply(level.getCommissionRate())
-                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+        // Auto calculate expected commission and royalty based on assigned user's sales level if not provided
+        User assignedTo = project.getAssignedTo();
+        if (assignedTo != null && assignedTo.getSalesLevel() != null && expectedValue.compareTo(BigDecimal.ZERO) > 0) {
+            SalesLevel level = assignedTo.getSalesLevel();
+            if (expectedCommission == null && level.getCommissionRate() != null) {
+                expectedCommission = expectedValue.multiply(level.getCommissionRate())
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
             }
-            if ((project.getExpectedRoyalty() == null || project.getExpectedRoyalty().compareTo(BigDecimal.ZERO) == 0) && level.getRoyaltyRate() != null) {
-                project.setExpectedRoyalty(project.getExpectedValue().multiply(level.getRoyaltyRate())
-                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+            if (expectedRoyalty == null && level.getRoyaltyRate() != null) {
+                expectedRoyalty = expectedValue.multiply(level.getRoyaltyRate())
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
             }
         }
 
+        project.setExpectedValue(expectedValue);
+        project.setExpectedCommission(expectedCommission != null ? expectedCommission : BigDecimal.ZERO);
+        project.setExpectedRoyalty(expectedRoyalty != null ? expectedRoyalty : BigDecimal.ZERO);
+
         Project updated = projectRepository.save(project);
 
         auditLogService.log(
                 loginUser.getUserId(),
-                "ASSIGN_SALESPERSON",
+                "UPDATE_PRICE",
                 "PROJECT",
                 updated.getId(),
-                "assignedTo=" + (oldAssigned != null ? oldAssigned.getName() : "None"),
-                "assignedTo=" + salesPerson.getName(),
+                "expectedValue=" + oldExpectedValue,
+                "expectedValue=" + expectedValue + ", expectedCommission=" + project.getExpectedCommission() + ", expectedRoyalty=" + project.getExpectedRoyalty(),
                 null
         );
 
-        return StandardResponse.success(mapToDto(updated), "Sales person assigned successfully");
-    }
-
-    @Override
-    @Transactional
-    public StandardResponse<ProjectResponseDto> submitForReview(Long id) {
-        if (id == null) {
-            throw new CustomException("Project ID cannot be null", "INVALID_INPUT");
-        }
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found with id: " + id));
-
-        ProjectStatus submittedStatus = projectStatusRepository.findByNameIgnoreCase("Submitted")
-                .orElseGet(() -> projectStatusRepository.findByNameIgnoreCase("In Review")
-                        .orElse(project.getStatus()));
-
-        project.setStatus(submittedStatus);
-        Project updated = projectRepository.save(project);
-
-        auditLogService.log(
-                loginUser.getUserId(),
-                "SUBMIT_FOR_REVIEW",
-                "PROJECT",
-                updated.getId(),
-                null,
-                "Project submitted for admin review",
-                null
-        );
-
-        return StandardResponse.success(mapToDto(updated), "Project submitted for review successfully");
-    }
-
-    @Override
-    @Transactional
-    public StandardResponse<ProjectResponseDto> adminApprove(Long id) {
-        if (id == null) {
-            throw new CustomException("Project ID cannot be null", "INVALID_INPUT");
-        }
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found with id: " + id));
-
-        ProjectStatus approvedStatus = projectStatusRepository.findByNameIgnoreCase("Approved")
-                .orElseGet(() -> projectStatusRepository.findByNameIgnoreCase("Negotiation")
-                        .orElse(project.getStatus()));
-
-        project.setStatus(approvedStatus);
-        Project updated = projectRepository.save(project);
-
-        auditLogService.log(
-                loginUser.getUserId(),
-                "ADMIN_APPROVE",
-                "PROJECT",
-                updated.getId(),
-                null,
-                "Project approved by admin",
-                null
-        );
-
-        if (project.getAssignedTo() != null) {
-            notificationService.sendNotification(
-                    project.getAssignedTo().getId(),
-                    "Project Approved",
-                    "Project '" + project.getTitle() + "' has been approved by admin."
-            );
-        }
-
-        return StandardResponse.success(mapToDto(updated), "Project approved by admin successfully");
-    }
-
-    @Override
-    @Transactional
-    public StandardResponse<ProjectResponseDto> markWon(Long id) {
-        if (id == null) {
-            throw new CustomException("Project ID cannot be null", "INVALID_INPUT");
-        }
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found with id: " + id));
-
-        if (project.getStatus() != null && "Won".equalsIgnoreCase(project.getStatus().getName())) {
-            throw new CustomException("Project is already marked as WON", "ALREADY_WON");
-        }
-
-        ProjectStatus wonStatus = projectStatusRepository.findByNameIgnoreCase("Won")
-                .orElseGet(() -> projectStatusRepository.findAll().stream()
-                        .filter(s -> Boolean.TRUE.equals(s.getIsWonStatus()))
-                        .findFirst()
-                        .orElse(project.getStatus()));
-
-        project.setStatus(wonStatus);
-        project.setActualCloseDate(LocalDate.now());
-        Project updated = projectRepository.save(project);
-
-        // Record Commission and Royalty
-        User assignedUser = project.getAssignedTo();
-        if (assignedUser != null) {
-            SalesLevel level = assignedUser.getSalesLevel();
-            BigDecimal commRate = level != null && level.getCommissionRate() != null ? level.getCommissionRate() : BigDecimal.ZERO;
-            BigDecimal commAmount = project.getExpectedValue() != null ?
-                    project.getExpectedValue().multiply(commRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
-
-            BigDecimal royRate = level != null && level.getRoyaltyRate() != null ? level.getRoyaltyRate() : BigDecimal.ZERO;
-            BigDecimal royAmount = project.getExpectedValue() != null ?
-                    project.getExpectedValue().multiply(royRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
-
-            ProjectCommission commission = ProjectCommission.builder()
-                    .project(updated)
-                    .user(assignedUser)
-                    .salesLevel(level)
-                    .commissionRate(commRate)
-                    .commissionAmount(commAmount)
-                    .status("Pending")
-                    .build();
-            commissionRepository.save(commission);
-
-            ProjectRoyalty royalty = ProjectRoyalty.builder()
-                    .project(updated)
-                    .user(assignedUser)
-                    .salesLevel(level)
-                    .royaltyRate(royRate)
-                    .royaltyAmount(royAmount)
-                    .periodType("Monthly")
-                    .periodStart(LocalDate.now())
-                    .status("Pending")
-                    .build();
-            royaltyRepository.save(royalty);
-
-            // Update user lifetime stats
-            assignedUser.setTotalProjects(assignedUser.getTotalProjects() + 1);
-            assignedUser.setTotalCommission(assignedUser.getTotalCommission().add(commAmount));
-            assignedUser.setTotalRoyalty(assignedUser.getTotalRoyalty().add(royAmount));
-            userRepository.save(assignedUser);
-
-            notificationService.sendNotification(
-                    assignedUser.getId(),
-                    "Project Won!",
-                    "Congratulations! Project '" + project.getTitle() + "' marked as WON. Expected commission: $" + commAmount
-            );
-        }
-
-        auditLogService.log(
-                loginUser.getUserId(),
-                "MARK_WON",
-                "PROJECT",
-                updated.getId(),
-                null,
-                "Project marked as WON. Commission and Royalty recorded.",
-                null
-        );
-
-        return StandardResponse.success(mapToDto(updated), "Project marked as WON successfully");
-    }
-
-    @Override
-    @Transactional
-    public StandardResponse<ProjectResponseDto> markLost(Long id) {
-        if (id == null) {
-            throw new CustomException("Project ID cannot be null", "INVALID_INPUT");
-        }
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found with id: " + id));
-
-        ProjectStatus lostStatus = projectStatusRepository.findByNameIgnoreCase("Lost")
-                .orElse(project.getStatus());
-
-        project.setStatus(lostStatus);
-        project.setActualCloseDate(LocalDate.now());
-        Project updated = projectRepository.save(project);
-
-        auditLogService.log(
-                loginUser.getUserId(),
-                "MARK_LOST",
-                "PROJECT",
-                updated.getId(),
-                null,
-                "Project marked as LOST",
-                null
-        );
-
-        if (project.getAssignedTo() != null) {
-            notificationService.sendNotification(
-                    project.getAssignedTo().getId(),
-                    "Project Closed - Lost",
-                    "Project '" + project.getTitle() + "' has been marked as LOST."
-            );
-        }
-
-        return StandardResponse.success(mapToDto(updated), "Project marked as LOST successfully");
+        return StandardResponse.success(mapToDto(updated), "Project price updated successfully");
     }
 
     @Override
@@ -518,5 +426,45 @@ public class ProjectServiceImpl implements ProjectService {
                 .expectedCloseDate(p.getExpectedCloseDate())
                 .actualCloseDate(p.getActualCloseDate())
                 .build();
+    }
+
+    private void updateSalesUserLevel(User user) {
+        if (user == null || user.getId() == null) {
+            return;
+        }
+
+        long projectCount = projectRepository.countByAssignedToIdAndIsDeletedFalse(user.getId());
+        user.setTotalProjects((int) projectCount);
+
+        List<SalesLevel> levels = salesLevelRepository.findByIsActiveTrueOrderByMinProjectsDesc();
+        if (levels != null && !levels.isEmpty()) {
+            SalesLevel matchedLevel = levels.stream()
+                    .filter(lvl -> lvl.getMinProjects() != null && projectCount >= lvl.getMinProjects())
+                    .findFirst()
+                    .orElse(levels.get(levels.size() - 1)); // Fallback to lowest level (e.g. Bronze)
+
+            SalesLevel currentLevel = user.getSalesLevel();
+            if (currentLevel == null || !currentLevel.getId().equals(matchedLevel.getId())) {
+                log.info("Auto-updating user {} (id: {}) sales level from {} to {} (project count: {})",
+                        user.getName(), user.getId(),
+                        (currentLevel != null ? currentLevel.getLevelName() : "None"),
+                        matchedLevel.getLevelName(),
+                        projectCount);
+
+                user.setSalesLevel(matchedLevel);
+
+                auditLogService.log(
+                        user.getId(),
+                        "SALES_LEVEL_UPDATE",
+                        "USER",
+                        user.getId(),
+                        "level=" + (currentLevel != null ? currentLevel.getLevelName() : "None"),
+                        "level=" + matchedLevel.getLevelName() + ", totalProjects=" + projectCount,
+                        "Auto-updated sales level based on database min_projects threshold (" + projectCount + " projects)"
+                );
+            }
+        }
+
+        userRepository.save(user);
     }
 }

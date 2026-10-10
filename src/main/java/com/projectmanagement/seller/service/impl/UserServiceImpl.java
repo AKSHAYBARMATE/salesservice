@@ -69,11 +69,11 @@ public class UserServiceImpl implements UserService {
                     .orElseThrow(() -> new ResourceNotFoundException("Role not found with id: " + requestDto.getRoleId()));
         }
 
-        SalesLevel salesLevel = null;
-        if (requestDto.getLevelId() != null) {
-            salesLevel = salesLevelRepository.findById(requestDto.getLevelId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Sales level not found with id: " + requestDto.getLevelId()));
-        }
+        // Automatically assign Bronze sales level for newly created user (initial projects = 0)
+        SalesLevel salesLevel = salesLevelRepository.findByLevelNameIgnoreCase("Bronze")
+                .orElseGet(() -> salesLevelRepository.findByIsActiveTrueOrderByMinProjectsAsc().stream()
+                        .findFirst()
+                        .orElse(null));
 
         String status = requestDto.getStatus() != null ? requestDto.getStatus().toUpperCase() : "ACTIVE";
         if (!VALID_STATUSES.contains(status)) {

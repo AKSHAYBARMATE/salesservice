@@ -27,13 +27,7 @@ public class ProjectDtos {
         @NotNull(message = "Client ID is required")
         private Long clientId;
 
-        private Long assignedTo;
-
         private Long statusId;
-
-        private BigDecimal expectedValue;
-        private BigDecimal expectedRoyalty;
-        private BigDecimal expectedCommission;
 
         @JsonFormat(pattern = "yyyy-MM-dd")
         private LocalDate startDate;
@@ -79,9 +73,12 @@ public class ProjectDtos {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class ProjectAssignSalesPersonRequestDto {
-        @NotNull(message = "Salesperson ID is required")
-        private Long salesPersonId;
+    public static class ProjectPriceUpdateRequestDto {
+        @NotNull(message = "Expected value / price is required")
+        private BigDecimal expectedValue;
+
+        private BigDecimal expectedRoyalty;
+        private BigDecimal expectedCommission;
     }
 
     @Data

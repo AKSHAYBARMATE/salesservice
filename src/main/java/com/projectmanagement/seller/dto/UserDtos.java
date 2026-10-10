@@ -27,7 +27,6 @@ public class UserDtos {
         private String phone;
         private String password;
         private Long roleId;
-        private Long levelId;
         private String status;
     }
 

@@ -57,29 +57,9 @@ public class ProjectController {
         return ResponseEntity.ok(projectService.updateProjectStatus(id, requestDto));
     }
 
-    @PostMapping("/assignSalesPerson/{id}")
-    public ResponseEntity<StandardResponse<ProjectResponseDto>> assignSalesPerson(@PathVariable Long id, @Valid @RequestBody ProjectAssignSalesPersonRequestDto requestDto) {
-        return ResponseEntity.ok(projectService.assignSalesPerson(id, requestDto));
-    }
-
-    @PostMapping("/submitProjectForReview/{id}")
-    public ResponseEntity<StandardResponse<ProjectResponseDto>> submitProjectForReview(@PathVariable Long id) {
-        return ResponseEntity.ok(projectService.submitForReview(id));
-    }
-
-    @PostMapping("/adminApproveProject/{id}")
-    public ResponseEntity<StandardResponse<ProjectResponseDto>> adminApproveProject(@PathVariable Long id) {
-        return ResponseEntity.ok(projectService.adminApprove(id));
-    }
-
-    @PostMapping("/markProjectWon/{id}")
-    public ResponseEntity<StandardResponse<ProjectResponseDto>> markProjectWon(@PathVariable Long id) {
-        return ResponseEntity.ok(projectService.markWon(id));
-    }
-
-    @PostMapping("/markProjectLost/{id}")
-    public ResponseEntity<StandardResponse<ProjectResponseDto>> markProjectLost(@PathVariable Long id) {
-        return ResponseEntity.ok(projectService.markLost(id));
+    @PatchMapping("/updatePrice/{id}")
+    public ResponseEntity<StandardResponse<ProjectResponseDto>> updatePrice(@PathVariable Long id, @Valid @RequestBody ProjectPriceUpdateRequestDto requestDto) {
+        return ResponseEntity.ok(projectService.updatePrice(id, requestDto));
     }
 
     @GetMapping("/getProjectTimeline/{id}")

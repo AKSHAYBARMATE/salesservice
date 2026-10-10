@@ -14,6 +14,8 @@ import java.util.List;
 public interface ProjectRepository extends JpaRepository<Project, Long> {
     List<Project> findByClientId(Long clientId);
     List<Project> findByAssignedToId(Long assignedToId);
+    long countByAssignedToId(Long assignedToId);
+    long countByAssignedToIdAndIsDeletedFalse(Long assignedToId);
 
     @Query("SELECT p FROM Project p WHERE " +
            "(:search IS NULL OR LOWER(p.title) LIKE LOWER(CONCAT('%', :search, '%')) OR " +

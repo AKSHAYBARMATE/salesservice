@@ -109,6 +109,15 @@ public class JwtExtractionFilter implements Filter {
             }
             loginUser.setEmail(email);
 
+            String role = (String) claims.get("role");
+            if (role != null) {
+                loginUser.setRole(role);
+            }
+            Object roleIdVal = claims.get("roleId");
+            if (roleIdVal != null) {
+                loginUser.setRoleId(Long.valueOf(roleIdVal.toString()));
+            }
+
             chain.doFilter(request, response);
         } catch (Exception e) {
             log.error("Error processing JWT token claims: {}", e.getMessage());

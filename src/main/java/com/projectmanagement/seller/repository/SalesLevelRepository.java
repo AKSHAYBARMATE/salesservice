@@ -12,4 +12,5 @@ public interface SalesLevelRepository extends JpaRepository<SalesLevel, Long> {
     Optional<SalesLevel> findByLevelNameIgnoreCase(String levelName);
     boolean existsByLevelNameIgnoreCase(String levelName);
     List<SalesLevel> findByIsActiveTrueOrderByMinProjectsAsc();
+    List<SalesLevel> findByIsActiveTrueOrderByMinProjectsDesc();
 }
