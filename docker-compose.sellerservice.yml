@@ -6,7 +6,7 @@ services:
     image: salesservice:latest
     container_name: salesservice
     ports:
-      - "8233:8233"
+      - "9079:9079"
     networks:
       - updated_orgadmin_rmscadminnetwork
     environment:
