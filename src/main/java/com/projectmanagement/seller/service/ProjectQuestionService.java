@@ -11,5 +11,4 @@ public interface ProjectQuestionService {
     StandardResponse<QuestionTemplateResponseDto> updateQuestionTemplate(Long id, QuestionTemplateRequestDto requestDto);
     StandardResponse<List<QuestionTemplateResponseDto>> getProjectQuestions(Long projectId);
     StandardResponse<List<ProjectAnswerResponseDto>> saveProjectAnswers(Long projectId, SaveAnswersRequestDto requestDto);
-    StandardResponse<List<ProjectAnswerResponseDto>> getProjectAnswers(Long projectId);
 }

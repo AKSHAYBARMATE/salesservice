@@ -48,9 +48,4 @@ public class ProjectQuestionController {
     ) {
         return ResponseEntity.ok(questionService.saveProjectAnswers(projectId, requestDto));
     }
-
-    @GetMapping("/getProjectAnswers/{projectId}")
-    public ResponseEntity<StandardResponse<List<ProjectAnswerResponseDto>>> getProjectAnswers(@PathVariable Long projectId) {
-        return ResponseEntity.ok(questionService.getProjectAnswers(projectId));
-    }
 }

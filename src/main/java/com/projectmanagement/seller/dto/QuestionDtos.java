@@ -41,6 +41,13 @@ public class QuestionDtos {
         private Boolean isRequired;
         private Integer sortOrder;
         private Boolean isActive;
+
+        // Answer fields for project context (populated if answered, null if not)
+        private Long answerId;
+        private String answerText;
+        private String answerOption;
+        private Long answeredById;
+        private String answeredByName;
     }
 
     @Data

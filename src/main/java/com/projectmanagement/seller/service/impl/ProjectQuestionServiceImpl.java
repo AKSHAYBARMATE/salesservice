@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -127,7 +128,39 @@ public class ProjectQuestionServiceImpl implements ProjectQuestionService {
         if (!projectRepository.existsById(projectId)) {
             throw new ResourceNotFoundException("Project not found with id: " + projectId);
         }
-        return getQuestionTemplates();
+
+        List<ProjectQuestion> questions = questionRepository.findByIsActiveTrueOrderBySortOrderAsc();
+        List<ProjectQuestionAnswer> answers = answerRepository.findByProjectId(projectId);
+
+        Map<Long, ProjectQuestionAnswer> answerMap = answers.stream()
+                .filter(a -> a.getQuestion() != null && a.getQuestion().getId() != null)
+                .collect(Collectors.toMap(
+                        a -> a.getQuestion().getId(),
+                        a -> a,
+                        (existing, replacement) -> replacement
+                ));
+
+        List<QuestionTemplateResponseDto> result = questions.stream()
+                .map(q -> {
+                    ProjectQuestionAnswer a = answerMap.get(q.getId());
+                    return QuestionTemplateResponseDto.builder()
+                            .id(q.getId())
+                            .questionText(q.getQuestionText())
+                            .questionType(q.getQuestionType())
+                            .options(q.getOptions())
+                            .isRequired(q.getIsRequired())
+                            .sortOrder(q.getSortOrder())
+                            .isActive(q.getIsActive())
+                            .answerId(a != null ? a.getId() : null)
+                            .answerText(a != null ? a.getAnswerText() : null)
+                            .answerOption(a != null ? a.getAnswerOption() : null)
+                            .answeredById(a != null && a.getAnsweredBy() != null ? a.getAnsweredBy().getId() : null)
+                            .answeredByName(a != null && a.getAnsweredBy() != null ? a.getAnsweredBy().getName() : null)
+                            .build();
+                })
+                .collect(Collectors.toList());
+
+        return StandardResponse.success(result, "Project questions and answers fetched successfully");
     }
 
     @Override
@@ -186,23 +219,6 @@ public class ProjectQuestionServiceImpl implements ProjectQuestionService {
                 .collect(Collectors.toList());
 
         return StandardResponse.success(dtos, "Project answers saved successfully");
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public StandardResponse<List<ProjectAnswerResponseDto>> getProjectAnswers(Long projectId) {
-        if (projectId == null) {
-            throw new CustomException("Project ID cannot be null", "INVALID_INPUT");
-        }
-        if (!projectRepository.existsById(projectId)) {
-            throw new ResourceNotFoundException("Project not found with id: " + projectId);
-        }
-
-        List<ProjectAnswerResponseDto> answers = answerRepository.findByProjectId(projectId).stream()
-                .map(this::mapAnswerToDto)
-                .collect(Collectors.toList());
-
-        return StandardResponse.success(answers, "Project saved answers fetched successfully");
     }
 
     private QuestionTemplateResponseDto mapQuestionToDto(ProjectQuestion q) {
